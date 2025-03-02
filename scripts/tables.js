@@ -209,6 +209,33 @@ module.exports = {
                     ["child_label", "TINYINT"],
                 ],
             },
+            {
+                name: "seats",
+                file: `${dirPath}/seats.txt`,
+                columns: [],
+            },
         ];
+    },
+    indexes: {
+        agency: {
+            idx: "idx_agency_id",
+            column: "agency_id",
+        },
+        routes: {
+            idx: "idx_route_id",
+            column: "route_id",
+        },
+        notes: {
+            idx: "idx_note_id",
+            column: "note_id",
+        },
+        trips: {
+            idx: "idx_trip_id",
+            column: "trip_id",
+        },
+        shapes: {
+            idx: "idx_shape_id",
+            column: "shape_id",
+        },
     },
 };

@@ -1,6 +1,7 @@
 const path = require("node:path");
 const { fileURLtoPath } = require("node:url");
 const fs = require("node:fs");
+const { Worker } = require("node:worker_threads");
 const dotenv = require("dotenv").config();
 
 const express = require("express");
@@ -12,21 +13,17 @@ const csvParser = require("csv-parser");
 const db = new Database(path.join(__dirname, "gtfs", "gtfs.db"));
 db.pragma("journal_mode = WAL");
 
-const { tables } = require(path.join(__dirname, "scripts", "tables.js"));
+const { tables, indexes } = require(path.join(__dirname, "scripts", "tables.js"));
 
 const { PORT } = process.env;
 const { NSW_APIKEY } = process.env;
 
+function wait(ms) {
+    return new Promise((resolve, reject) => setTimeout(resolve, ms));
+}
+
 class Endpoint {
-    constructor({
-        name,
-        endpointName,
-        urls,
-        method,
-        headers,
-        protobuf,
-        protoType,
-    }) {
+    constructor({ name, endpointName, urls, method, headers, protobuf, protoType }) {
         this.name = `${name}_${endpointName}`;
         this.urls = urls;
         this.method = method || "GET";
@@ -41,6 +38,54 @@ class Endpoint {
         this.lookup = root.lookupType(this.protoType);
 
         await this.updateGTFS();
+        await this.updateGTFSR();
+    }
+
+    async createAndUpdateTable(name, columns, filePath) {
+        return new Promise((resolve, reject) => {
+            if (columns.length === 0) resolve();
+            const tableName = `${this.name}_${name}`;
+            const columnDef = columns.map((col) => col.join(" ")).join(", ");
+            db.exec(`CREATE TABLE IF NOT EXISTS ${tableName} (${columnDef});`);
+            db.exec(`DELETE FROM ${tableName};`);
+
+            const insertStatement = db.prepare(
+                `INSERT INTO ${tableName} (${columns.map((col) => `${col[0]}`).join(", ")}) VALUES (${columns.map(() => `?`).join(", ")});`
+            );
+            const rows = [];
+            const transaction = db.transaction(() => {
+                rows.forEach((row) => insertStatement.run(...columns.map((col) => row[col[0].trim()])));
+            });
+
+            const stream = fs.createReadStream(filePath).pipe(
+                csvParser({
+                    mapHeaders: ({ header }) => header.trim(),
+                })
+            );
+            stream.on("data", (row) => {
+                rows.push(row);
+                if (rows.length >= 500) {
+                    transaction();
+                    rows.length = 0;
+                }
+            });
+            stream.on("end", () => {
+                if (rows.length > 0) {
+                    transaction();
+                }
+            });
+            stream.on("error", (error) => {
+                reject(error);
+            });
+
+            const index = indexes[name];
+            if (index) {
+                db.exec(`DROP INDEX IF EXISTS "${index.idx}";`);
+                db.exec(`CREATE INDEX IF NOT EXISTS "${index.idx}" ON "${tableName}"("${index.column}");`);
+            }
+
+            resolve();
+        });
     }
 
     async updateGTFS() {
@@ -52,21 +97,19 @@ class Endpoint {
         let lastModified = response0.headers.get("last-modified");
         lastModified = Date.parse(lastModified);
         if (!response0.ok || !lastModified) {
-            throw new Error(
-                `HTTP request failed with status ${response0.status}` +
-                    JSON.stringify(response0)
-            );
+            throw new Error(`HTTP request failed with status ${response0.status}` + JSON.stringify(response0));
         }
 
+        const gtfsFile = path.join(__dirname, "gtfs", "gtfs.json");
         const gtfsLastUpdated = JSON.parse(
-            fs.readFileSync(path.join(__dirname, "gtfs", "gtfs.json"), {
+            fs.readFileSync(gtfsFile, {
                 encoding: "utf8",
                 flag: "r",
             }) || "{}"
         );
         if (!gtfsLastUpdated.lastUpdated) gtfsLastUpdated.lastUpdated = {};
 
-        if (gtfsLastUpdated.lastUpdated[this.name] == lastModified) return;
+        if (gtfsLastUpdated.lastUpdated[this.name] === lastModified) return;
 
         console.log("UPDATING GTFS " + this.name);
         const response1 = await fetch(this.urls.gtfsSchedule, {
@@ -79,11 +122,7 @@ class Endpoint {
         const blob = await response1.blob();
 
         console.log("READ & UNZIP ZIP " + this.name);
-        const zipFilePath = path.join(
-            __dirname,
-            "gtfs",
-            `${this.name}_${Date.now()}.zip`
-        );
+        const zipFilePath = path.join(__dirname, "gtfs", `${this.name}_${Date.now()}.zip`);
         fs.closeSync(fs.openSync(zipFilePath, "w"));
         const reader = blob.stream().getReader();
         const writableStream = fs.createWriteStream(zipFilePath);
@@ -96,143 +135,36 @@ class Endpoint {
             writableStream.write(value);
         }
 
-        const unzipDirPath = path.join(
-            __dirname,
-            "gtfs",
-            `${this.name}_${Date.now()}`
-        );
+        const unzipDirPath = path.join(__dirname, "gtfs", `${this.name}_${Date.now()}`);
         fs.mkdirSync(unzipDirPath, {
             recursive: true,
         });
         const directory = await unzipper.Open.file(zipFilePath);
         await directory.extract({ path: unzipDirPath });
 
-        new Promise((resolve, reject) => {
-            try {
-                const thisTables = tables(this.name);
-                const createdTables = [];
-                for (let i = 0; i < thisTables.length; i++) {
-                    const { name, columns } = thisTables[i];
-                    const filePath = path.join(unzipDirPath, `${name}.txt`);
-                    if (fs.existsSync(filePath)) {
-                        const tableName = `${this.name}_${name}`;
-                        const columnDef = columns
-                            .map((col) => col.join(" "))
-                            .join(", ");
-                        db.exec(
-                            `CREATE TABLE IF NOT EXISTS ${tableName} (${columnDef});`
-                        );
-                        db.exec(`DELETE FROM ${tableName};`);
-                        createdTables.push(`${tableName}`);
-
-                        const insertStatement = db.prepare(
-                            `INSERT INTO ${tableName} (${columns
-                                .map((col) => `${col[0]}`)
-                                .join(", ")}) VALUES (${columns
-                                .map(() => `?`)
-                                .join(", ")});`
-                        );
-                        const rows = [];
-                        const transaction = db.transaction(() => {
-                            rows.forEach((row) =>
-                                insertStatement.run(
-                                    ...columns.map((col) => row[col[0].trim()])
-                                )
-                            );
-                        });
-
-                        new Promise((resolve, reject) => {
-                            fs.createReadStream(filePath)
-                                .pipe(
-                                    csvParser({
-                                        mapHeaders: ({ header }) =>
-                                            header.trim(),
-                                    })
-                                )
-                                .on("data", (row) => {
-                                    rows.push(row);
-                                    if (rows.length >= 500) {
-                                        transaction();
-                                        rows.length = 0;
-                                    }
-                                })
-                                .on("end", () => {
-                                    if (rows.length > 0) {
-                                        transaction();
-                                    }
-                                    resolve();
-                                })
-                                .on("error", (error) => {
-                                    reject(error);
-                                });
-                        });
-
-                        const indexes = [
-                            {
-                                table: `${tableName}_agency`,
-                                idx: "idx_agency_id",
-                                column: "agency_id",
-                            },
-                            {
-                                table: `${tableName}_routes`,
-                                idx: "idx_route_id",
-                                column: "route_id",
-                            },
-                            {
-                                table: `${tableName}_notes`,
-                                idx: "idx_note_id",
-                                column: "note_id",
-                            },
-                            {
-                                table: `${tableName}_trips`,
-                                idx: "idx_trip_id",
-                                column: "trip_id",
-                            },
-                            {
-                                table: `${tableName}_shapes`,
-                                idx: "idx_shape_id",
-                                column: "shape_id",
-                            },
-                        ];
-                        db.transaction(() => {
-                            for (let i = 0; i < indexes.length; i++) {
-                                const index = indexes[i];
-                                if (createdTables.includes(index.table)) {
-                                    db.exec(
-                                        `DROP INDEX IF EXISTS "${index.idx}";`
-                                    );
-                                    db.exec(
-                                        `CREATE INDEX IF NOT EXISTS "${index.idx}" ON "${index.table}"("${index.column}");`
-                                    );
-                                }
-                            }
-                        })();
-                    }
-                }
-            } catch (error) {
-                reject(error);
+        const thisTables = tables(this.name);
+        const promises = thisTables.map(async ({ name, columns }) => {
+            const filePath = path.join(unzipDirPath, `${name}.txt`);
+            if (fs.existsSync(filePath)) {
+                return this.createAndUpdateTable(name, columns, filePath);
             }
-            resolve();
-        }).catch((error) => {
-            console.error(error);
+            return Promise.resolve();
         });
+
+        await Promise.all(promises);
+
+        await wait(100);
 
         fs.unlinkSync(zipFilePath);
         fs.rmSync(unzipDirPath, { recursive: true, force: true }, (error) => {
             if (error) {
-                console.error(error);
+                throw new Error(error);
             }
         });
 
         gtfsLastUpdated.lastUpdated[this.name] = lastModified;
-        fs.writeFileSync(
-            path.join(__dirname, "gtfs", "gtfs.json"),
-            JSON.stringify(gtfsLastUpdated, null, 2)
-        );
+        fs.writeFileSync(gtfsFile, JSON.stringify(gtfsLastUpdated, null, 2));
     }
-
-    // fetchGTFSR(this.urls.gtfsrTripUpdates);
-    // fetchGTFSR(this.urls.gtfsrVehiclePositions);
 
     async fetchGTFSR(url) {
         try {
@@ -242,14 +174,32 @@ class Endpoint {
                 headers: this.headers.gtfsr,
             });
             if (!response.ok) {
-                throw new Error(
-                    `HTTP request failed with status ${response.status}` +
-                        JSON.stringify(response)
-                );
+                throw new Error(`HTTP request failed with status ${response.status}` + JSON.stringify(response));
             }
             const buffer = await response.arrayBuffer();
             const decoded = this.lookup.decode(new Uint8Array(buffer));
             return decoded;
+        } catch (error) {
+            console.error(error);
+        }
+    }
+
+    async updateGTFSR() {
+        try {
+            const [TripUpdates, VehiclePositions] = await Promise.all([
+                await this.fetchGTFSR(this.urls.gtfsrTripUpdates),
+                await this.fetchGTFSR(this.urls.gtfsrVehiclePositions),
+            ]);
+
+            const worker = new Worker(path.join(__dirname, "scripts", "gtfsr-thread.js"), {
+                workerData: { TripUpdates, VehiclePositions },
+            });
+            worker.on("message", (message) => {
+                console.log(message);
+            });
+            worker.on("error", (error) => {
+                console.error(error);
+            });
         } catch (error) {
             console.error(error);
         }
@@ -268,8 +218,7 @@ class API {
             if (!endpoints[i].name) endpoints[i].name = this.name;
             if (!endpoints[i].headers) endpoints[i].headers = this.headers;
             if (!endpoints[i].protobuf) endpoints[i].protobuf = this.protobuf;
-            if (!endpoints[i].protoType)
-                endpoints[i].protoType = this.protoType;
+            if (!endpoints[i].protoType) endpoints[i].protoType = this.protoType;
             const endpoint = new Endpoint(endpoints[i]);
             endpoint.init();
 
@@ -296,25 +245,19 @@ const NSW = new API({
         {
             endpointName: "sydneytrains",
             urls: {
-                gtfsSchedule:
-                    "https://api.transport.nsw.gov.au/v1/gtfs/schedule/sydneytrains",
-                gtfsrTripUpdates:
-                    "https://api.transport.nsw.gov.au/v2/gtfs/realtime/sydneytrains",
-                gtfsrVehiclePositions:
-                    "https://api.transport.nsw.gov.au/v2/gtfs/vehiclepos/sydneytrains",
+                gtfsSchedule: "https://api.transport.nsw.gov.au/v1/gtfs/schedule/sydneytrains",
+                gtfsrTripUpdates: "https://api.transport.nsw.gov.au/v2/gtfs/realtime/sydneytrains",
+                gtfsrVehiclePositions: "https://api.transport.nsw.gov.au/v2/gtfs/vehiclepos/sydneytrains",
             },
         },
-        // {
-        //     endpointName: "nswtrains",
-        //     urls: {
-        //         gtfsSchedule:
-        //             "https://api.transport.nsw.gov.au/v1/gtfs/schedule/nswtrains",
-        //         gtfsrTripUpdates:
-        //             "https://api.transport.nsw.gov.au/v1/gtfs/realtime/nswtrains",
-        //         gtfsrVehiclePositions:
-        //             "https://api.transport.nsw.gov.au/v1/gtfs/vehiclepos/nswtrains",
-        //     },
-        // },
+        {
+            endpointName: "nswtrains",
+            urls: {
+                gtfsSchedule: "https://api.transport.nsw.gov.au/v1/gtfs/schedule/nswtrains",
+                gtfsrTripUpdates: "https://api.transport.nsw.gov.au/v1/gtfs/realtime/nswtrains",
+                gtfsrVehiclePositions: "https://api.transport.nsw.gov.au/v1/gtfs/vehiclepos/nswtrains",
+            },
+        },
     ],
 });
 

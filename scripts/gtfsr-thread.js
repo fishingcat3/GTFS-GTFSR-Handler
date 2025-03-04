@@ -12,7 +12,7 @@ for (let i = 0; i < TripUpdateResponse.length; i++) {
     const Vehicle = {};
 
     const FeedEntity = TripUpdateResponse[i];
-    const TripUpdate = FeedEntity.trip;
+    const TripUpdate = FeedEntity.tripUpdate;
     TripUpdate.feedEntityId = FeedEntity.id;
 
     let VehiclePosition = null;
@@ -25,7 +25,7 @@ for (let i = 0; i < TripUpdateResponse.length; i++) {
 
     // VehiclePosition may return as null (no vehicle pos found)
 
-    console.log(TripUpdate, VehiclePosition);
+    // console.log(TripUpdate, VehiclePosition);
 
     VehiclePositionResponse[i] = VehiclePosition;
 }

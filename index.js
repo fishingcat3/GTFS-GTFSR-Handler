@@ -1,5 +1,4 @@
 const path = require("node:path");
-const { fileURLtoPath } = require("node:url");
 const fs = require("node:fs");
 const { Worker } = require("node:worker_threads");
 const dotenv = require("dotenv").config();
@@ -10,13 +9,31 @@ const unzipper = require("unzipper");
 const Database = require("better-sqlite3");
 const csvParser = require("csv-parser");
 
+const colour = require("colour");
+
 const db = new Database(path.join(__dirname, "gtfs", "gtfs.db"));
 db.pragma("journal_mode = WAL");
 
 const { tables, indexes } = require(path.join(__dirname, "scripts", "tables.js"));
 
+const gtfsFilePath = path.join(__dirname, "gtfs", "gtfs.json");
+const gtfsFile = JSON.parse(
+    fs.readFileSync(gtfsFilePath, {
+        encoding: "utf8",
+        flag: "r",
+    }) || "{}"
+);
+
 const { PORT } = process.env;
 const { NSW_APIKEY } = process.env;
+
+const log = {
+    INITIALISE: "[INITIALISE]".blue,
+    UPDATING: "[UPDATING]".yellow,
+    FINISHED: "[FINISHED]".green,
+    GTFS: "GTFS ".magenta,
+    GTFSR: "GTFSR".magenta,
+};
 
 function wait(ms) {
     return new Promise((resolve, reject) => setTimeout(resolve, ms));
@@ -34,6 +51,8 @@ class Endpoint {
     }
 
     async init() {
+        console.log(`${log.INITIALISE} '${this.name}' endpoint`);
+
         const root = await protobufjs.load(this.protobuf);
         this.lookup = root.lookupType(this.protoType);
 
@@ -57,24 +76,24 @@ class Endpoint {
                 rows.forEach((row) => insertStatement.run(...columns.map((col) => row[col[0].trim()])));
             });
 
-            const stream = fs.createReadStream(filePath).pipe(
+            const readStream = fs.createReadStream(filePath).pipe(
                 csvParser({
                     mapHeaders: ({ header }) => header.trim(),
                 })
             );
-            stream.on("data", (row) => {
+            readStream.on("data", (row) => {
                 rows.push(row);
                 if (rows.length >= 500) {
                     transaction();
                     rows.length = 0;
                 }
             });
-            stream.on("end", () => {
+            readStream.on("end", () => {
                 if (rows.length > 0) {
                     transaction();
                 }
             });
-            stream.on("error", (error) => {
+            readStream.on("error", (error) => {
                 reject(error);
             });
 
@@ -89,9 +108,12 @@ class Endpoint {
     }
 
     async updateGTFS() {
+        console.log(`${log.UPDATING} ${log.GTFS} '${this.name}' endpoint`);
+
+        // CREATE TEMPORAY TABLE INSTEAD OF OVERRIDING
+
         const response0 = await fetch(this.urls.gtfsSchedule, {
             method: "HEAD",
-            mode: "cors",
             headers: this.headers.gtfs,
         });
         let lastModified = response0.headers.get("last-modified");
@@ -100,28 +122,19 @@ class Endpoint {
             throw new Error(`HTTP request failed with status ${response0.status}` + JSON.stringify(response0));
         }
 
-        const gtfsFile = path.join(__dirname, "gtfs", "gtfs.json");
-        const gtfsLastUpdated = JSON.parse(
-            fs.readFileSync(gtfsFile, {
-                encoding: "utf8",
-                flag: "r",
-            }) || "{}"
-        );
-        if (!gtfsLastUpdated.lastUpdated) gtfsLastUpdated.lastUpdated = {};
+        if (!gtfsFile.lastUpdated) gtfsFile.lastUpdated = {};
 
-        if (gtfsLastUpdated.lastUpdated[this.name] === lastModified) return;
+        if (gtfsFile.lastUpdated[this.name] === lastModified) {
+            return console.log(`${log.FINISHED} ${log.GTFS} '${this.name}' endpoint`);
+        }
 
-        console.log("UPDATING GTFS " + this.name);
         const response1 = await fetch(this.urls.gtfsSchedule, {
             method: this.method,
-            mode: "cors",
             headers: this.headers.gtfs,
         });
 
-        console.log("AWAIT BLOB " + this.name);
         const blob = await response1.blob();
 
-        console.log("READ & UNZIP ZIP " + this.name);
         const zipFilePath = path.join(__dirname, "gtfs", `${this.name}_${Date.now()}.zip`);
         fs.closeSync(fs.openSync(zipFilePath, "w"));
         const reader = blob.stream().getReader();
@@ -135,7 +148,7 @@ class Endpoint {
             writableStream.write(value);
         }
 
-        const unzipDirPath = path.join(__dirname, "gtfs", `${this.name}_${Date.now()}`);
+        const unzipDirPath = path.join(__dirname, "gtfs", zipFilePath.slice(0, -4));
         fs.mkdirSync(unzipDirPath, {
             recursive: true,
         });
@@ -162,15 +175,16 @@ class Endpoint {
             }
         });
 
-        gtfsLastUpdated.lastUpdated[this.name] = lastModified;
-        fs.writeFileSync(gtfsFile, JSON.stringify(gtfsLastUpdated, null, 2));
+        gtfsFile.lastUpdated[this.name] = lastModified;
+        fs.writeFileSync(gtfsFilePath, JSON.stringify(gtfsFile, null, 2));
+
+        console.log(`${log.FINISHED} ${log.GTFS} '${this.name}' endpoint`);
     }
 
     async fetchGTFSR(url) {
         try {
             const response = await fetch(url, {
                 method: this.method,
-                mode: "cors",
                 headers: this.headers.gtfsr,
             });
             if (!response.ok) {
@@ -185,6 +199,8 @@ class Endpoint {
     }
 
     async updateGTFSR() {
+        console.log(`${log.UPDATING} ${log.GTFSR} '${this.name}' endpoint`);
+
         try {
             const [TripUpdates, VehiclePositions] = await Promise.all([
                 await this.fetchGTFSR(this.urls.gtfsrTripUpdates),
@@ -195,7 +211,8 @@ class Endpoint {
                 workerData: { TripUpdates, VehiclePositions },
             });
             worker.on("message", (message) => {
-                console.log(message);
+                // console.log(message);
+                console.log(`${log.FINISHED} ${log.GTFSR} '${this.name}' endpoint`);
             });
             worker.on("error", (error) => {
                 console.error(error);
@@ -208,10 +225,12 @@ class Endpoint {
 
 class API {
     constructor({ name, headers, protobuf, protoType, endpoints }) {
-        this.name = name || "API" + Math.floor(Math.random() * 1000);
+        this.name = name || "API";
         this.headers = headers || {};
         this.protobuf = protobuf || null;
         this.protoType = protoType || null;
+        this.autoUpdateGTFSinterval = null;
+        this.autoUpdateGTFSRinterval = null;
 
         this.endpoints = [];
         for (let i = 0; i < endpoints.length; i++) {
@@ -224,6 +243,58 @@ class API {
 
             this.endpoints.push(endpoint);
         }
+    }
+
+    updateGTFS() {
+        console.log(`${log.UPDATING} ${log.GTFS} '${this.name}' API`);
+        for (let i = 0; i < this.endpoints.length; i++) {
+            this.endpoints[i].updateGTFS();
+        }
+        console.log(`${log.FINISHED} ${log.GTFS} '${this.name}' API`);
+        return this;
+    }
+
+    updateGTFSR() {
+        console.log(`${log.UPDATING} ${log.GTFSR} '${this.name}' API`);
+        for (let i = 0; i < this.endpoints.length; i++) {
+            this.endpoints[i].updateGTFSR();
+        }
+        console.log(`${log.FINISHED} ${log.GTFSR} '${this.name}' API`);
+        return this;
+    }
+
+    autoUpdateGTFS(period = 8 * 60 * 60 * 1000) {
+        if (period === null) {
+            clearInterval(this.autoUpdateGTFSinterval);
+            this.autoUpdateGTFSinterval = null;
+            return this;
+        }
+        if (this.autoUpdateGTFSinterval !== null) {
+            this.autoUpdateGTFS(null);
+            this.autoUpdateGTFS(period);
+            return this;
+        }
+        this.autoUpdateGTFSinterval = setInterval(() => {
+            this.updateGTFS();
+        }, period);
+        return this;
+    }
+
+    autoUpdateGTFSR(period = 60 * 1000) {
+        if (period === null) {
+            clearInterval(this.autoUpdateGTFSRinterval);
+            this.autoUpdateGTFSRinterval = null;
+            return this;
+        }
+        if (this.autoUpdateGTFSRinterval !== null) {
+            this.autoUpdateGTFSR(null);
+            this.autoUpdateGTFSR(period);
+            return this;
+        }
+        this.autoUpdateGTFSRinterval = setInterval(() => {
+            this.updateGTFSR();
+        }, period);
+        return this;
     }
 }
 
@@ -251,22 +322,57 @@ const NSW = new API({
             },
         },
         {
-            endpointName: "nswtrains",
+            endpointName: "metro",
             urls: {
-                gtfsSchedule: "https://api.transport.nsw.gov.au/v1/gtfs/schedule/nswtrains",
-                gtfsrTripUpdates: "https://api.transport.nsw.gov.au/v1/gtfs/realtime/nswtrains",
-                gtfsrVehiclePositions: "https://api.transport.nsw.gov.au/v1/gtfs/vehiclepos/nswtrains",
+                gtfsSchedule: "https://api.transport.nsw.gov.au/v2/gtfs/schedule/metro",
+                gtfsrTripUpdates: "https://api.transport.nsw.gov.au/v2/gtfs/realtime/metro",
+                gtfsrVehiclePositions: "https://api.transport.nsw.gov.au/v2/gtfs/vehiclepos/metro",
             },
         },
+        ...[
+            "buses",
+            "nswtrains",
+            "lightrail/cbdandsoutheast",
+            "lightrail/innerwest",
+            "lightrail/newcastle",
+            "lightrail/parramatta",
+            "ferries/sydneyferries",
+            "regionbuses/centralwestandorana",
+            "regionbuses/centralwestandorana2",
+            "regionbuses/newenglandnorthwest",
+            "regionbuses/northcoast",
+            "regionbuses/northcoast2",
+            "regionbuses/northcoast3",
+            "regionbuses/riverinamurray",
+            "regionbuses/riverinamurray2",
+            "regionbuses/southeasttablelands",
+            "regionbuses/southeasttablelands2",
+            "regionbuses/sydneysurrounds",
+            "regionbuses/newcastlehunter",
+            "regionbuses/farwest",
+        ].map((name) => {
+            {
+                return {
+                    endpointName: name.replaceAll("/", ""),
+                    urls: {
+                        gtfsSchedule: `https://api.transport.nsw.gov.au/v1/gtfs/schedule/${name}`,
+                        gtfsrTripUpdates: `https://api.transport.nsw.gov.au/v1/gtfs/realtime/${name}`,
+                        gtfsrVehiclePositions: `https://api.transport.nsw.gov.au/v1/gtfs/vehiclepos/${name}`,
+                    },
+                };
+            }
+        }),
     ],
-});
+})
+    .autoUpdateGTFS(2 * 60 * 60 * 1000)
+    .autoUpdateGTFSR(20 * 1000);
 
-const app = express();
+// const app = express();
 
-app.get("/api", (req, res) => {
-    return res.sendStatus(200);
-});
+// app.get("/api", (req, res) => {
+//     return res.sendStatus(200);
+// });
 
-app.listen(PORT, "127.0.0.1", async () => {
-    console.log(`Server is running on port ${PORT}`);
-});
+// app.listen(PORT, "127.0.0.1", async () => {
+//     console.log(`${log.INITIALISE} Server on port ${PORT}`);
+// });

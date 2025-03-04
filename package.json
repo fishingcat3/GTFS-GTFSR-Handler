@@ -16,5 +16,8 @@
         "express": "^4.21.2",
         "protobufjs": "^7.4.0",
         "unzipper": "^0.12.3"
+    },
+    "devDependencies": {
+        "colour": "^0.7.1"
     }
 }

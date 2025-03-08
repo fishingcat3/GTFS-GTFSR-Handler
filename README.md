@@ -2,6 +2,9 @@
 
 **Work in Progress**
 
+-   Service alerts not implemented yet
+-   Actually saving the GTFSR data so it can be monitored isn't implemented yet
+
 1. Run `npm install`
 2. The `.env` file requires the following variables:
     - PORT (not used yet)

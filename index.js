@@ -322,7 +322,7 @@ class API {
 }
 
 // https://opendata.transport.nsw.gov.au/data/organization/transport-opendata-hub
-const NSW = new API({
+const NEW_SOUTH_WALES = new API({
     name: "NSW",
     headers: {
         gtfs: {
@@ -391,8 +391,8 @@ const NSW = new API({
     .autoUpdateGTFS(2 * 60 * 60 * 1000)
     .autoUpdateGTFSR(20 * 1000);
 
-// https://translink.com.au/about-translink/open-data/gtfs-rt
-// const QLD = new API({
+// // https://translink.com.au/about-translink/open-data/gtfs-rt
+// const QUEENSLAND = new API({
 //     name: "QLD",
 //     headers: {
 //         gtfs: {
@@ -414,7 +414,36 @@ const NSW = new API({
 //             },
 //         },
 //     ],
-// });
+// })
+//     .autoUpdateGTFS(2 * 60 * 60 * 1000)
+//     .autoUpdateGTFSR(20 * 1000);
+
+// // https://gtfs.adelaidemetro.com.au/#/
+// const SOUTH_AUSTRALIA = new API({
+//     name: "SA",
+//     headers: {
+//         gtfs: {
+//             accept: "application/octet-stream",
+//         },
+//         gtfsr: {
+//             accept: "application/x-google-protobuf",
+//         },
+//     },
+//     protobuf: path.join(__dirname, "protobuf", "SA_adelaidemetro_gtfsr.proto"),
+//     protoType: "transit_realtime.FeedMessage",
+//     endpoints: [
+//         {
+//             endpointName: "adelaidemetro",
+//             urls: {
+//                 gtfsSchedule: "https://gtfs.adelaidemetro.com.au/v1/static/latest/google_transit.zip",
+//                 gtfsrTripUpdates: "https://gtfs.adelaidemetro.com.au/v1/realtime/trip_updates",
+//                 gtfsrVehiclePositions: "https://gtfs.adelaidemetro.com.au/v1/realtime/vehicle_positions",
+//             },
+//         },
+//     ],
+// })
+//     .autoUpdateGTFS(2 * 60 * 60 * 1000)
+//     .autoUpdateGTFSR(20 * 1000);
 
 // const app = express();
 

@@ -30,4 +30,4 @@ for (let i = 0; i < TripUpdateResponse.length; i++) {
     VehiclePositionResponse[i] = VehiclePosition;
 }
 
-parentPort.postMessage({});
+parentPort.postMessage(VehiclePositionResponse);

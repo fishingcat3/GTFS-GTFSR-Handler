@@ -125,8 +125,6 @@ class Endpoint {
 
         console.log(`${log.UPDATING} ${log.GTFS} '${this.name}' endpoint`);
 
-        // CREATE TEMPORAY TABLE INSTEAD OF OVERRIDING
-
         const response0 = await fetch(this.urls.gtfsSchedule, {
             method: "HEAD",
             headers: this.headers.gtfs,
@@ -273,7 +271,7 @@ class API {
         for (let i = 0; i < this.endpoints.length; i++) {
             this.endpoints[i].updateGTFS();
         }
-        console.log(`${log.FINISHED} ${log.GTFS} '${this.name}' API in ${comma(Date.now() - startTime).blue}ms`);
+        console.log(`${log.FINISHED} ${log.GTFS} '${this.name}' API in ${(comma(Date.now() - startTime) + "ms").blue}`);
         return this;
     }
 
@@ -283,7 +281,7 @@ class API {
         for (let i = 0; i < this.endpoints.length; i++) {
             this.endpoints[i].updateGTFSR();
         }
-        console.log(`${log.FINISHED} ${log.GTFSR} '${this.name}' API in ${comma(Date.now() - startTime).blue}ms`);
+        console.log(`${log.FINISHED} ${log.GTFSR} '${this.name}' API in ${(comma(Date.now() - startTime) + "ms").blue}`);
         return this;
     }
 

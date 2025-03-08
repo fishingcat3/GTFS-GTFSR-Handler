@@ -1,12 +1,16 @@
 const path = require("node:path");
 const { parentPort, workerData } = require("node:worker_threads");
 
-const { TripUpdates, VehiclePositions } = workerData;
+const { name, version, TripUpdates, VehiclePositions } = workerData;
 
-const TripUpdateResponse = TripUpdates.response;
+const TripUpdateResponse = TripUpdates.response || [];
 const TripUpdateHeaders = TripUpdates.header;
-const VehiclePositionResponse = VehiclePositions.response;
+const VehiclePositionResponse = VehiclePositions.response || [];
 const VehiclePositionHeaders = VehiclePositions.header;
+
+if (!TripUpdateHeaders || !VehiclePositionHeaders) {
+    throw new Error("Invalid GTFSR data provided");
+}
 
 for (let i = 0; i < TripUpdateResponse.length; i++) {
     const Vehicle = {};

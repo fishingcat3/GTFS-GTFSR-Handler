@@ -23,6 +23,8 @@ const gtfsFile = JSON.parse(
         flag: "r",
     }) || "{}"
 );
+if (!gtfsFile.version) gtfsFile.version = {};
+if (!gtfsFile.lastUpdated) gtfsFile.lastUpdated = {};
 
 const { PORT } = process.env;
 const { NSW_APIKEY } = process.env;
@@ -37,6 +39,10 @@ const log = {
 
 function wait(ms) {
     return new Promise((resolve, reject) => setTimeout(resolve, ms));
+}
+
+function comma(val) {
+    return String(val).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
 class Endpoint {
@@ -69,7 +75,8 @@ class Endpoint {
     async createAndUpdateTable(name, columns, filePath) {
         return new Promise((resolve, reject) => {
             if (columns.length === 0) resolve();
-            const tableName = `${this.name}_${name}`;
+
+            const tableName = `${this.name}_${gtfsFile.version[this.name]}_${name}`;
             const columnDef = columns.map((col) => col.join(" ")).join(", ");
             db.exec(`CREATE TABLE IF NOT EXISTS ${tableName} (${columnDef});`);
             db.exec(`DELETE FROM ${tableName};`);
@@ -130,7 +137,6 @@ class Endpoint {
             throw new Error(`HTTP request failed with status ${response0.status}` + JSON.stringify(response0));
         }
 
-        if (!gtfsFile.lastUpdated) gtfsFile.lastUpdated = {};
         if (!gtfsFile.lastUpdated[this.apiName]) gtfsFile.lastUpdated[this.apiName] = {};
 
         if (gtfsFile.lastUpdated[this.apiName][this.name] === lastModified) {
@@ -157,7 +163,7 @@ class Endpoint {
             writableStream.write(value);
         }
 
-        const unzipDirPath = path.join(__dirname, "gtfs", zipFilePath.slice(0, -4));
+        const unzipDirPath = zipFilePath.slice(0, -4);
         fs.mkdirSync(unzipDirPath, {
             recursive: true,
         });
@@ -165,6 +171,10 @@ class Endpoint {
         await directory.extract({ path: unzipDirPath });
 
         const thisTables = tables(this.name);
+
+        if (!gtfsFile.version[this.name]) gtfsFile.version[this.name] = -1;
+        gtfsFile.version[this.name]++;
+
         const promises = thisTables.map(async ({ name, columns }) => {
             const filePath = path.join(unzipDirPath, `${name}.txt`);
             if (fs.existsSync(filePath)) {
@@ -219,7 +229,7 @@ class Endpoint {
             ]);
 
             const worker = new Worker(path.join(__dirname, "scripts", "gtfsr-thread.js"), {
-                workerData: { TripUpdates, VehiclePositions },
+                workerData: { name: this.endpointName, version: gtfsFile.version[this.name], TripUpdates, VehiclePositions },
             });
             worker.on("message", (message) => {
                 // console.log(message);
@@ -257,20 +267,22 @@ class API {
     }
 
     updateGTFS() {
+        const startTime = Date.now();
         console.log(`${log.UPDATING} ${log.GTFS} '${this.name}' API`);
         for (let i = 0; i < this.endpoints.length; i++) {
             this.endpoints[i].updateGTFS();
         }
-        console.log(`${log.FINISHED} ${log.GTFS} '${this.name}' API`);
+        console.log(`${log.FINISHED} ${log.GTFS} '${this.name}' API in ${comma(Date.now() - startTime).blue}ms`);
         return this;
     }
 
     updateGTFSR() {
+        const startTime = Date.now();
         console.log(`${log.UPDATING} ${log.GTFSR} '${this.name}' API`);
         for (let i = 0; i < this.endpoints.length; i++) {
             this.endpoints[i].updateGTFSR();
         }
-        console.log(`${log.FINISHED} ${log.GTFSR} '${this.name}' API`);
+        console.log(`${log.FINISHED} ${log.GTFSR} '${this.name}' API in ${comma(Date.now() - startTime).blue}ms`);
         return this;
     }
 
@@ -310,99 +322,99 @@ class API {
 }
 
 // https://opendata.transport.nsw.gov.au/data/organization/transport-opendata-hub
-// const NSW = new API({
-//     name: "NSW",
-//     headers: {
-//         gtfs: {
-//             accept: "application/octet-stream",
-//             authorization: `apikey ${NSW_APIKEY}`,
-//         },
-//         gtfsr: {
-//             accept: "application/x-google-protobuf",
-//             authorization: `apikey ${NSW_APIKEY}`,
-//         },
-//     },
-//     protobuf: path.join(__dirname, "protobuf", "NSW_1007_extension.proto"),
-//     protoType: "transit_realtime.FeedMessage",
-//     endpoints: [
-//         {
-//             endpointName: "sydneytrains",
-//             urls: {
-//                 gtfsSchedule: "https://api.transport.nsw.gov.au/v1/gtfs/schedule/sydneytrains",
-//                 gtfsrTripUpdates: "https://api.transport.nsw.gov.au/v2/gtfs/realtime/sydneytrains",
-//                 gtfsrVehiclePositions: "https://api.transport.nsw.gov.au/v2/gtfs/vehiclepos/sydneytrains",
-//             },
-//         },
-//         {
-//             endpointName: "metro",
-//             urls: {
-//                 gtfsSchedule: "https://api.transport.nsw.gov.au/v2/gtfs/schedule/metro",
-//                 gtfsrTripUpdates: "https://api.transport.nsw.gov.au/v2/gtfs/realtime/metro",
-//                 gtfsrVehiclePositions: "https://api.transport.nsw.gov.au/v2/gtfs/vehiclepos/metro",
-//             },
-//         },
-//         ...[
-//             "buses",
-//             "nswtrains",
-//             "lightrail/cbdandsoutheast",
-//             "lightrail/innerwest",
-//             "lightrail/newcastle",
-//             "lightrail/parramatta",
-//             "ferries/sydneyferries",
-//             "regionbuses/centralwestandorana",
-//             "regionbuses/centralwestandorana2",
-//             "regionbuses/newenglandnorthwest",
-//             "regionbuses/northcoast",
-//             "regionbuses/northcoast2",
-//             "regionbuses/northcoast3",
-//             "regionbuses/riverinamurray",
-//             "regionbuses/riverinamurray2",
-//             "regionbuses/southeasttablelands",
-//             "regionbuses/southeasttablelands2",
-//             "regionbuses/sydneysurrounds",
-//             "regionbuses/newcastlehunter",
-//             "regionbuses/farwest",
-//         ].map((name) => {
-//             {
-//                 return {
-//                     endpointName: name.replaceAll("/", ""),
-//                     urls: {
-//                         gtfsSchedule: `https://api.transport.nsw.gov.au/v1/gtfs/schedule/${name}`,
-//                         gtfsrTripUpdates: `https://api.transport.nsw.gov.au/v1/gtfs/realtime/${name}`,
-//                         gtfsrVehiclePositions: `https://api.transport.nsw.gov.au/v1/gtfs/vehiclepos/${name}`,
-//                     },
-//                 };
-//             }
-//         }),
-//     ],
-// })
-//     .autoUpdateGTFS(2 * 60 * 60 * 1000)
-//     .autoUpdateGTFSR(20 * 1000);
-
-// https://translink.com.au/about-translink/open-data/gtfs-rt
-const QLD = new API({
-    name: "QLD",
+const NSW = new API({
+    name: "NSW",
     headers: {
         gtfs: {
             accept: "application/octet-stream",
+            authorization: `apikey ${NSW_APIKEY}`,
         },
         gtfsr: {
             accept: "application/x-google-protobuf",
+            authorization: `apikey ${NSW_APIKEY}`,
         },
     },
-    protobuf: path.join(__dirname, "protobuf", "QLD-gtfs-realtime.proto"),
+    protobuf: path.join(__dirname, "protobuf", "NSW_1007_extension.proto"),
     protoType: "transit_realtime.FeedMessage",
     endpoints: [
         {
-            endpointName: "seq",
+            endpointName: "sydneytrains",
             urls: {
-                gtfsSchedule: "https://gtfsrt.api.translink.com.au/GTFS/SEQ_GTFS.zip",
-                gtfsrTripUpdates: "https://gtfsrt.api.translink.com.au/api/realtime/SEQ/TripUpdates",
-                gtfsrVehiclePositions: "https://gtfsrt.api.translink.com.au/api/realtime/SEQ/VehiclePositions",
+                gtfsSchedule: "https://api.transport.nsw.gov.au/v1/gtfs/schedule/sydneytrains",
+                gtfsrTripUpdates: "https://api.transport.nsw.gov.au/v2/gtfs/realtime/sydneytrains",
+                gtfsrVehiclePositions: "https://api.transport.nsw.gov.au/v2/gtfs/vehiclepos/sydneytrains",
             },
         },
+        {
+            endpointName: "metro",
+            urls: {
+                gtfsSchedule: "https://api.transport.nsw.gov.au/v2/gtfs/schedule/metro",
+                gtfsrTripUpdates: "https://api.transport.nsw.gov.au/v2/gtfs/realtime/metro",
+                gtfsrVehiclePositions: "https://api.transport.nsw.gov.au/v2/gtfs/vehiclepos/metro",
+            },
+        },
+        ...[
+            "buses",
+            "nswtrains",
+            "lightrail/cbdandsoutheast",
+            "lightrail/innerwest",
+            "lightrail/newcastle",
+            "lightrail/parramatta",
+            "ferries/sydneyferries",
+            "regionbuses/centralwestandorana",
+            "regionbuses/centralwestandorana2",
+            "regionbuses/newenglandnorthwest",
+            "regionbuses/northcoast",
+            "regionbuses/northcoast2",
+            "regionbuses/northcoast3",
+            "regionbuses/riverinamurray",
+            "regionbuses/riverinamurray2",
+            "regionbuses/southeasttablelands",
+            "regionbuses/southeasttablelands2",
+            "regionbuses/sydneysurrounds",
+            "regionbuses/newcastlehunter",
+            "regionbuses/farwest",
+        ].map((name) => {
+            {
+                return {
+                    endpointName: name.replaceAll("/", ""),
+                    urls: {
+                        gtfsSchedule: `https://api.transport.nsw.gov.au/v1/gtfs/schedule/${name}`,
+                        gtfsrTripUpdates: `https://api.transport.nsw.gov.au/v1/gtfs/realtime/${name}`,
+                        gtfsrVehiclePositions: `https://api.transport.nsw.gov.au/v1/gtfs/vehiclepos/${name}`,
+                    },
+                };
+            }
+        }),
     ],
-});
+})
+    .autoUpdateGTFS(2 * 60 * 60 * 1000)
+    .autoUpdateGTFSR(20 * 1000);
+
+// https://translink.com.au/about-translink/open-data/gtfs-rt
+// const QLD = new API({
+//     name: "QLD",
+//     headers: {
+//         gtfs: {
+//             accept: "application/octet-stream",
+//         },
+//         gtfsr: {
+//             accept: "application/x-google-protobuf",
+//         },
+//     },
+//     protobuf: path.join(__dirname, "protobuf", "QLD_gtfs-realtime.proto"),
+//     protoType: "GTFSv2.Realtime.FeedMessage",
+//     endpoints: [
+//         {
+//             endpointName: "seq",
+//             urls: {
+//                 gtfsSchedule: "https://gtfsrt.api.translink.com.au/GTFS/SEQ_GTFS.zip",
+//                 gtfsrTripUpdates: "https://gtfsrt.api.translink.com.au/api/realtime/SEQ/TripUpdates",
+//                 gtfsrVehiclePositions: "https://gtfsrt.api.translink.com.au/api/realtime/SEQ/VehiclePositions",
+//             },
+//         },
+//     ],
+// });
 
 // const app = express();
 

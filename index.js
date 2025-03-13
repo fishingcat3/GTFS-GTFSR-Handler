@@ -8,8 +8,7 @@ const protobufjs = require("protobufjs");
 const unzipper = require("unzipper");
 const Database = require("better-sqlite3");
 const csvParser = require("csv-parser");
-
-const colour = require("colour");
+require("colour");
 
 const db = new Database(path.join(__dirname, "gtfs", "gtfs.db"));
 db.pragma("journal_mode = WAL");
@@ -37,7 +36,7 @@ const log = {
 };
 
 function wait(ms) {
-    return new Promise((resolve, reject) => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function comma(val) {
@@ -392,36 +391,9 @@ class API {
 //     .autoUpdateGTFS(2 * 60 * 60 * 1000)
 //     .autoUpdateGTFSR(20 * 1000);
 
-// // https://translink.com.au/about-translink/open-data/gtfs-rt
-// const QUEENSLAND = new API({
-//     name: "QLD",
-//     headers: {
-//         gtfs: {
-//             accept: "application/octet-stream",
-//         },
-//         gtfsr: {
-//             accept: "application/x-google-protobuf",
-//         },
-//     },
-//     protobuf: path.join(__dirname, "protobuf", "QLD_gtfs-realtime.proto"),
-//     protoType: "GTFSv2.Realtime.FeedMessage",
-//     endpoints: [
-//         {
-//             endpointName: "seq",
-//             urls: {
-//                 gtfsSchedule: "https://gtfsrt.api.translink.com.au/GTFS/SEQ_GTFS.zip",
-//                 gtfsrTripUpdates: "https://gtfsrt.api.translink.com.au/api/realtime/SEQ/TripUpdates",
-//                 gtfsrVehiclePositions: "https://gtfsrt.api.translink.com.au/api/realtime/SEQ/VehiclePositions",
-//             },
-//         },
-//     ],
-// })
-//     .autoUpdateGTFS(2 * 60 * 60 * 1000)
-//     .autoUpdateGTFSR(20 * 1000);
-
-// https://gtfs.adelaidemetro.com.au/#/
-const SOUTH_AUSTRALIA = new API({
-    name: "SA",
+// https://translink.com.au/about-translink/open-data/gtfs-rt
+const QUEENSLAND = new API({
+    name: "QLD",
     headers: {
         gtfs: {
             accept: "application/octet-stream",
@@ -430,21 +402,48 @@ const SOUTH_AUSTRALIA = new API({
             accept: "application/x-google-protobuf",
         },
     },
-    protobuf: path.join(__dirname, "protobuf", "SA_adelaidemetro_gtfsr.proto"),
-    protoType: "transit_realtime.FeedMessage",
-    endpoints: [
-        {
-            endpointName: "adelaidemetro",
+    protobuf: path.join(__dirname, "protobuf", "QLD_gtfs-realtime.proto"),
+    protoType: "GTFSv2.Realtime.FeedMessage",
+    endpoints: ["seq", "cns", "nsi", "mhb", "bow", "inn"].map((name) => {
+        return {
+            endpointName: name.toLowerCase(),
             urls: {
-                gtfsSchedule: "https://gtfs.adelaidemetro.com.au/v1/static/latest/google_transit.zip",
-                gtfsrTripUpdates: "https://gtfs.adelaidemetro.com.au/v1/realtime/trip_updates",
-                gtfsrVehiclePositions: "https://gtfs.adelaidemetro.com.au/v1/realtime/vehicle_positions",
+                gtfsSchedule: `https://gtfsrt.api.translink.com.au/GTFS/${name.toUpperCase()}_GTFS.zip`,
+                gtfsrTripUpdates: `https://gtfsrt.api.translink.com.au/api/realtime/${name.toUpperCase()}/TripUpdates`,
+                gtfsrVehiclePositions: `https://gtfsrt.api.translink.com.au/api/realtime/${name.toUpperCase()}/VehiclePositions`,
             },
-        },
-    ],
+        };
+    }),
 })
     .autoUpdateGTFS(2 * 60 * 60 * 1000)
     .autoUpdateGTFSR(20 * 1000);
+
+// // https://gtfs.adelaidemetro.com.au/#/
+// const SOUTH_AUSTRALIA = new API({
+//     name: "SA",
+//     headers: {
+//         gtfs: {
+//             accept: "application/octet-stream",
+//         },
+//         gtfsr: {
+//             accept: "application/x-google-protobuf",
+//         },
+//     },
+//     protobuf: path.join(__dirname, "protobuf", "SA_adelaidemetro_gtfsr.proto"),
+//     protoType: "transit_realtime.FeedMessage",
+//     endpoints: [
+//         {
+//             endpointName: "adelaidemetro",
+//             urls: {
+//                 gtfsSchedule: "https://gtfs.adelaidemetro.com.au/v1/static/latest/google_transit.zip",
+//                 gtfsrTripUpdates: "https://gtfs.adelaidemetro.com.au/v1/realtime/trip_updates",
+//                 gtfsrVehiclePositions: "https://gtfs.adelaidemetro.com.au/v1/realtime/vehicle_positions",
+//             },
+//         },
+//     ],
+// })
+//     .autoUpdateGTFS(2 * 60 * 60 * 1000)
+//     .autoUpdateGTFSR(20 * 1000);
 
 // const app = express();
 

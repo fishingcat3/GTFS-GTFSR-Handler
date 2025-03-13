@@ -4,6 +4,7 @@
     "description": "",
     "main": "index.js",
     "scripts": {
+        "apis": "node apis.js",
         "postinstall": "node postinstall.js"
     },
     "keywords": [],

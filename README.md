@@ -10,5 +10,6 @@
     - PORT (not used yet)
     - NSW_APIKEY ([Transport Open Data Hub User Guide](https://opendata.transport.nsw.gov.au/developers/userguide), API key required for NSW
       API)
+3. `npm run apis` or `node apis.js` to start
 
-You can choose to enable different APIs by commenting or removing the comments at the bottom of `./index.js`
+You can choose to enable different APIs by commenting or removing the comments in `apis.js`

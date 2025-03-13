@@ -1,11 +1,11 @@
 const path = require("node:path");
 const { parentPort, workerData } = require("node:worker_threads");
 
-const { name, version, TripUpdates, VehiclePositions } = workerData;
+const { apiName, name, version, TripUpdates, VehiclePositions } = workerData;
 
-const TripUpdateResponse = TripUpdates.response || [];
+const TripUpdateResponse = TripUpdates.response || TripUpdates.entity || [];
 const TripUpdateHeaders = TripUpdates.header;
-const VehiclePositionResponse = VehiclePositions.response || [];
+const VehiclePositionResponse = VehiclePositions.response || VehiclePositions.entity || [];
 const VehiclePositionHeaders = VehiclePositions.header;
 
 if (!TripUpdateHeaders || !VehiclePositionHeaders) {
@@ -21,7 +21,7 @@ for (let i = 0; i < TripUpdateResponse.length; i++) {
 
     let VehiclePosition = null;
     for (let j = 0; j < VehiclePositionResponse.length; j++) {
-        if (VehiclePositionResponse[j] === TripUpdate.trip.tripId) {
+        if (VehiclePositionResponse[j]?.vehicle?.trip?.tripId === TripUpdate?.trip?.tripId) {
             VehiclePosition = VehiclePositionResponse[j];
             break;
         }
@@ -31,7 +31,13 @@ for (let i = 0; i < TripUpdateResponse.length; i++) {
 
     // console.log(TripUpdate, VehiclePosition);
 
+    if (VehiclePosition === null) {
+        // console.log(TripUpdate);
+    }
+
     VehiclePositionResponse[i] = VehiclePosition;
 }
 
-parentPort.postMessage(VehiclePositionResponse);
+// console.log(TripUpdateResponse.map((x) => x?.tripUpdate?.trip?.tripId));
+// parentPort.postMessage(VehiclePositionResponse);
+parentPort.postMessage({});

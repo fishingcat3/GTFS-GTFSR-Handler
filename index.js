@@ -27,7 +27,6 @@ if (!gtfsFile.version) gtfsFile.version = {};
 if (!gtfsFile.lastUpdated) gtfsFile.lastUpdated = {};
 
 const { PORT } = process.env;
-const { NSW_APIKEY } = process.env;
 
 const log = {
     INITIALISE: "[INITIALISE]".blue,
@@ -116,6 +115,9 @@ class Endpoint {
                 db.exec(`CREATE INDEX IF NOT EXISTS "${index.idx}" ON "${tableName}"("${index.column}");`);
             }
 
+            const oldTableName = `${this.name}_${gtfsFile.version[this.apiName][this.name] - 1}_${name}`;
+            db.exec(`DROP TABLE IF EXISTS "${oldTableName}";`);
+
             resolve();
         });
     }
@@ -170,8 +172,8 @@ class Endpoint {
 
         const thisTables = tables(this.name);
 
-        if (!gtfsFile.version[this.apiName]) gtfsFile.version[this.apiName] = {};
-        if (!gtfsFile.version[this.apiName][this.name]) gtfsFile.version[this.apiName][this.name] = -1;
+        if (gtfsFile.version[this.apiName] === undefined) gtfsFile.version[this.apiName] = {};
+        if (gtfsFile.version[this.apiName][this.name] === undefined) gtfsFile.version[this.apiName][this.name] = -1;
         gtfsFile.version[this.apiName][this.name]++;
 
         const promises = thisTables.map(async ({ name, columns }) => {
@@ -326,11 +328,11 @@ class API {
 //     headers: {
 //         gtfs: {
 //             accept: "application/octet-stream",
-//             authorization: `apikey ${NSW_APIKEY}`,
+//             authorization: `apikey ${process.env.NSW_APIKEY}`,
 //         },
 //         gtfsr: {
 //             accept: "application/x-google-protobuf",
-//             authorization: `apikey ${NSW_APIKEY}`,
+//             authorization: `apikey ${process.env.NSW_APIKEY}`,
 //         },
 //     },
 //     protobuf: path.join(__dirname, "protobuf", "NSW_1007_extension.proto"),

@@ -3,7 +3,6 @@ const fs = require("node:fs");
 const { Worker } = require("node:worker_threads");
 const dotenv = require("dotenv").config();
 
-const express = require("express");
 const protobufjs = require("protobufjs");
 const unzipper = require("unzipper");
 const Database = require("better-sqlite3");
@@ -320,21 +319,6 @@ class API {
         return this;
     }
 }
-
-// const app = express();
-
-// // e.g. /api/NSW/sydneytrains/trips
-// app.get("/api/:apiName/:endpointName/:tableName", (req, res) => {
-//     const { apiName, endpointName, tableName } = req.params;
-//     const query = req.query;
-//     const { limit, offset } = query;
-
-//     return res.sendStatus(200);
-// });
-
-// app.listen(PORT, "127.0.0.1", async () => {
-//     console.log(`${log.INITIALISE} Server on port ${PORT}`);
-// });
 
 // https://opendata.transport.nsw.gov.au/data/organization/transport-opendata-hub
 const NEW_SOUTH_WALES = new API({

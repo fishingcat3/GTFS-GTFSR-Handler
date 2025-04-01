@@ -38,6 +38,8 @@ for (let i = 0; i < TripUpdateResponse.length; i++) {
     VehiclePositionResponse[i] = VehiclePosition;
 }
 
+// console.log(TripUpdateResponse);
+
 // console.log(TripUpdateResponse.map((x) => x?.tripUpdate?.trip?.tripId));
 // parentPort.postMessage(VehiclePositionResponse);
 parentPort.postMessage({});

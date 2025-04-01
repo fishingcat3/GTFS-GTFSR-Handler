@@ -6,4 +6,4 @@ fs.writeFileSync(path.join(__dirname, ".env"), "");
 fs.mkdirSync(path.join(__dirname, "gtfs"), { recursive: true });
 fs.writeFileSync(path.join(__dirname, "gtfs", "gtfs.db"), "");
 fs.writeFileSync(path.join(__dirname, "gtfs", "gtfs.json"), "{}");
-fs.writeFileSync(path.join(__dirname, "gtfs", "gtfs.jsonr"), "{}");
+fs.writeFileSync(path.join(__dirname, "gtfs", "gtfsr.json"), "{}");
